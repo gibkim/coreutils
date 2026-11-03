@@ -5,6 +5,7 @@
 
 // spell-checker:ignore binvalid finvalid hinvalid iinvalid linvalid nabcabc nabcabcabc ninvalid vinvalid winvalid dabc näää févr
 
+use rstest::rstest;
 use uutests::{at_and_ucmd, new_ucmd, util::TestScenario, util_name};
 
 #[test]
@@ -373,6 +374,23 @@ fn test_join_blank_lines() {
                 "       \n",
                 "     2\t\n",
             ));
+    }
+}
+
+#[rstest]
+#[case("\\:\\:")]
+#[case("\\:\\:\\:")]
+#[case("\\:")]
+fn test_join_blank_lines_across_section_delimiters(#[case] delimiter: &str) {
+    for renumber in [true, false] {
+        let mut cmd = new_ucmd!();
+        cmd.args(&["-ba", "-ha", "-fa", "-l2", "-w1", "-s:"]);
+        if !renumber {
+            cmd.arg("-p");
+        }
+        cmd.pipe_in(format!("\n{delimiter}\n\nX\n"))
+            .succeeds()
+            .stdout_is("  \n\n1:\n2:X\n");
     }
 }
 

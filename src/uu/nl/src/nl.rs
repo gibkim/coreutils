@@ -439,12 +439,6 @@ fn nl<T: Read>(reader: &mut BufReader<T>, stats: &mut Stats, settings: &Settings
 
         let _ = line.pop_if(|byte| *byte == b'\n');
 
-        if line.is_empty() {
-            stats.consecutive_empty_lines += 1;
-        } else {
-            stats.consecutive_empty_lines = 0;
-        }
-
         if let Some(section) = SectionDelimiter::parse(&line, &settings.section_delimiter) {
             stats.section = section;
             if settings.renumber {
@@ -452,6 +446,11 @@ fn nl<T: Read>(reader: &mut BufReader<T>, stats: &mut Stats, settings: &Settings
             }
             writeln!(writer).map_err_context(|| translate!("nl-error-could-not-write"))?;
         } else {
+            if line.is_empty() {
+                stats.consecutive_empty_lines += 1;
+            } else {
+                stats.consecutive_empty_lines = 0;
+            }
             let current_numbering_style = match stats.section {
                 SectionDelimiter::Header => &settings.header_numbering,
                 SectionDelimiter::Body => &settings.body_numbering,
