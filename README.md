@@ -1,0 +1,1 @@
+Temporary diagnostic branch for PR16192. No production code is changed. Exact upstream source SHAs are checked out by the workflow; CodSpeed uploads are disabled. Raw allocation traces are retained as a short-lived Actions artifact.

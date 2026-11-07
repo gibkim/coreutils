@@ -1,0 +1,84 @@
+name: du memory repeat diagnosis
+on:
+  push:
+    branches: [diagnostics/du-memory-16192-20261107]
+permissions:
+  contents: read
+jobs:
+  repeat:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    env:
+      CARGO_INCREMENTAL: 0
+      RUSTUP_TOOLCHAIN: 1.99.1
+      CODSPEED_SKIP_UPLOAD: 'true'
+      CODSPEED_LOG: debug
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: uutils/coreutils
+          ref: e03b9f6233ced7bef32104c2b9de6b265299caf4
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: uutils/coreutils
+          ref: 16b3fbca5b7c13c9b161c29e09bfe35093d70c76
+          path: merge
+          persist-credentials: false
+      - name: Set up pinned tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools" "$GITHUB_WORKSPACE/results"
+          cd "$RUNNER_TEMP/tools"
+          curl -fLsS -o runner.tar.gz https://github.com/CodSpeedHQ/codspeed/releases/download/v5.6.3/codspeed-runner-x86_64-unknown-linux-musl.tar.gz
+          echo 'f29532a5cbcb3462bc5d6bcf5570ddb8c8cbfffed579cb48c35d3910ed5f7f00  runner.tar.gz' | sha256sum -c -
+          tar -xzf runner.tar.gz --strip-components=1
+          curl -fLsS -o cargo-codspeed https://github.com/CodSpeedHQ/codspeed-rust/releases/download/v6.0.0/cargo-codspeed-x86_64-unknown-linux-musl
+          echo '99b4ada4e00a0b4e153f5fe50f70844898cbd6f77274cbe29e44bf671e5f85d8  cargo-codspeed' | sha256sum -c -
+          chmod +x cargo-codspeed
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+          rustup toolchain install 1.99.1 --profile minimal
+          sudo locale-gen fr_FR.UTF-8
+          sudo update-locale
+          { uname -a; rustc -Vv; ldd --version | head -1; cat /etc/os-release; cat /proc/self/status | sed -n '/Cpus_allowed_list/p'; } > "$GITHUB_WORKSPACE/results/environment.txt"
+      - name: Build both pinned benchmark snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in base merge; do
+            cd "$GITHUB_WORKSPACE/$variant"
+            cargo codspeed build -m memory -p uu_du --locked
+            sha256sum target/codspeed/analysis/uu_du/du_bench > "$GITHUB_WORKSPACE/results/$variant-binary.sha256"
+          done
+      - name: Repeat full du suite in balanced order, then single CPU control
+        shell: bash
+        run: |
+          set -euo pipefail
+          first_cpu=$(awk '/Cpus_allowed_list/ { split($2, a, /[-,]/); print a[1] }' /proc/self/status)
+          for repeat in $(seq 1 8); do
+            order='base merge'
+            if (( repeat % 2 == 0 )); then order='merge base'; fi
+            for variant in $order; do
+              cd "$GITHUB_WORKSPACE/$variant"
+              name="$variant-default-$repeat"
+              codspeed run -m memory --profile-folder "$GITHUB_WORKSPACE/results/$name" -- 'cargo codspeed run -p uu_du > /dev/null' > "$GITHUB_WORKSPACE/results/$name.log" 2>&1
+              echo "Completed $name"
+            done
+          done
+          cd "$GITHUB_WORKSPACE/merge"
+          for repeat in $(seq 1 4); do
+            name="merge-cpu0-$repeat"
+            codspeed run -m memory --profile-folder "$GITHUB_WORKSPACE/results/$name" -- "taskset -c $first_cpu cargo codspeed run -p uu_du > /dev/null" > "$GITHUB_WORKSPACE/results/$name.log" 2>&1
+            echo "Completed $name"
+          done
+          find "$GITHUB_WORKSPACE/results" -type f -name '*.msgpack' -print0 | sort -z | xargs -0 sha256sum > "$GITHUB_WORKSPACE/results/raw-sha256.txt"
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: du-memory-repeat
+          path: results/
+          retention-days: 3
+          compression-level: 6
