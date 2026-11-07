@@ -1,5 +1,6 @@
 name: du memory repeat diagnosis
 on:
+  workflow_dispatch:
   push:
     branches: [diagnostics/du-memory-16192-20261107]
 permissions:
